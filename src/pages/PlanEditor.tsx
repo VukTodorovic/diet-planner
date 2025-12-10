@@ -4,7 +4,8 @@ import { Plus, Trash2, ArrowLeft, Download } from 'lucide-react';
 import type { DietPlan, Meal, MealItem, PlanOption } from '../types';
 import { foods } from '../data/foods';
 import { getPlan, savePlan } from '../utils/storage';
-import { calculateItemCalories, calculateMealCalories, calculateOptionCalories } from '../utils/calculations';
+import { calculateItemCalories, calculateMealCalories, calculateOptionCalories, calculateItemMacros, calculateMealMacros, calculateOptionMacros } from '../utils/calculations';
+import { calculateShoppingList } from '../utils/shoppingList';
 import { v4 as uuidv4 } from 'uuid';
 import jsPDF from 'jspdf';
 // @ts-ignore
@@ -229,7 +230,12 @@ export const PlanEditor: React.FC = () => {
 
         doc.setFontSize(18);
         doc.setTextColor(14, 165, 233); // Sky blue
-        doc.text(`${option.name} (Total: ${calculateOptionCalories(option).toFixed(0)} kcal)`, 14, yPos);
+        doc.text(option.name, 14, yPos);
+        yPos += 8;
+        
+        doc.setFontSize(12);
+        const optionMacros = calculateOptionMacros(option);
+        doc.text(`Total: ${calculateOptionCalories(option).toFixed(0)} kcal - P: ${optionMacros.protein.toFixed(1)}g, C: ${optionMacros.carbs.toFixed(1)}g, F: ${optionMacros.fat.toFixed(1)}g`, 14, yPos);
         doc.setTextColor(0, 0, 0); // Reset color
         yPos += 10;
 
@@ -250,7 +256,8 @@ export const PlanEditor: React.FC = () => {
           }
 
           doc.setFontSize(14);
-          doc.text(`${meal.name} (${calculateMealCalories(meal).toFixed(0)} kcal)`, 14, yPos);
+          const mealMacros = calculateMealMacros(meal);
+          doc.text(`${meal.name} (${calculateMealCalories(meal).toFixed(0)} kcal - P: ${mealMacros.protein.toFixed(1)}g, C: ${mealMacros.carbs.toFixed(1)}g, F: ${mealMacros.fat.toFixed(1)}g)`, 14, yPos);
           yPos += 5;
 
           // Meal Note
@@ -272,16 +279,20 @@ export const PlanEditor: React.FC = () => {
               quantityText = `${item.quantity} x ${item.food.unit}`;
             }
 
+            const macros = calculateItemMacros(item);
             return [
               item.food.name,
               quantityText,
-              `${calculateItemCalories(item).toFixed(0)} kcal`
+              `${calculateItemCalories(item).toFixed(0)} kcal`,
+              `${macros.protein.toFixed(1)}g`,
+              `${macros.carbs.toFixed(1)}g`,
+              `${macros.fat.toFixed(1)}g`
             ];
           });
 
           autoTable(doc, {
             startY: yPos,
-            head: [['Food', 'Quantity', 'Calories']],
+            head: [['Food', 'Quantity', 'Calories', 'Protein', 'Carbs', 'Fat']],
             body: tableData,
             theme: 'striped',
             headStyles: { fillColor: [14, 165, 233] },
@@ -293,6 +304,44 @@ export const PlanEditor: React.FC = () => {
         });
         
         yPos += 10; // Space between options
+      });
+
+      // Shopping Summary
+      if (yPos > 250) {
+        doc.addPage();
+        yPos = 20;
+      }
+
+      doc.setFontSize(18);
+      doc.setTextColor(14, 165, 233); // Sky blue
+      doc.text('Shopping Summary', 14, yPos);
+      doc.setTextColor(0, 0, 0); // Reset color
+      yPos += 10;
+
+      const shoppingList = calculateShoppingList(plan);
+      const shoppingTableData = shoppingList.map(item => {
+        let quantityText = '';
+        if (item.food.unit === '100g') {
+          quantityText = `${(item.totalQuantity * 100).toFixed(0)}g`;
+        } else if (item.food.unit === 'piece') {
+          quantityText = `${item.totalQuantity}`;
+        } else {
+          quantityText = `${item.totalQuantity} x ${item.food.unit}`;
+        }
+        
+        return [
+          item.food.name, 
+          quantityText
+        ];
+      });
+
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Food', 'Total Quantity']],
+        body: shoppingTableData,
+        theme: 'striped',
+        headStyles: { fillColor: [14, 165, 233] },
+        margin: { left: 14 },
       });
 
       doc.save(`${plan.name.replace(/\s+/g, '_')}.pdf`);
@@ -397,6 +446,11 @@ export const PlanEditor: React.FC = () => {
               />
               <p className="total-calories">
                 Option Calories: <span className="calories-value">{calculateOptionCalories(activeOption).toFixed(0)}</span> kcal
+                <span className="macros-summary" style={{ marginLeft: '1rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                  (P: {calculateOptionMacros(activeOption).protein.toFixed(1)}g, 
+                   C: {calculateOptionMacros(activeOption).carbs.toFixed(1)}g, 
+                   F: {calculateOptionMacros(activeOption).fat.toFixed(1)}g)
+                </span>
               </p>
               <textarea
                 value={activeOption.note || ''}
@@ -472,9 +526,14 @@ export const PlanEditor: React.FC = () => {
                         style={{ fontSize: '0.9rem', marginTop: '0.5rem', width: '100%' }}
                       />
                     </div>
-                    <span className="meal-calories-badge">
-                      {calculateMealCalories(meal).toFixed(0)} kcal
-                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      <span className="meal-calories-badge">
+                        {calculateMealCalories(meal).toFixed(0)} kcal
+                      </span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                        P: {calculateMealMacros(meal).protein.toFixed(1)}g C: {calculateMealMacros(meal).carbs.toFixed(1)}g F: {calculateMealMacros(meal).fat.toFixed(1)}g
+                      </span>
+                    </div>
                   </div>
                   <button onClick={() => handleDeleteMeal(meal.id)} className="btn-icon btn-danger-icon">
                     <Trash2 size={20} />
@@ -486,7 +545,12 @@ export const PlanEditor: React.FC = () => {
                     <div key={item.id} className="food-item">
                       <div className="food-info">
                         <div className="food-name">{item.food.name}</div>
-                        <div className="food-meta">{item.food.calories} kcal / {item.food.unit}</div>
+                        <div className="food-meta">
+                          {item.food.calories} kcal / {item.food.unit}
+                          <span style={{ marginLeft: '0.5rem', color: 'var(--text-secondary)' }}>
+                            (P: {item.food.protein}g C: {item.food.carbs}g F: {item.food.fat}g)
+                          </span>
+                        </div>
                       </div>
                       
                       <div className="food-controls">
@@ -504,8 +568,17 @@ export const PlanEditor: React.FC = () => {
                           </div>
                         </div>
                         
-                        <div className="item-calories">
-                          {calculateItemCalories(item).toFixed(0)} kcal
+                        <div className="item-calories" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                          <span>{calculateItemCalories(item).toFixed(0)} kcal</span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                            P: {calculateItemMacros(item).protein.toFixed(1)}g
+                          </span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                            C: {calculateItemMacros(item).carbs.toFixed(1)}g
+                          </span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                            F: {calculateItemMacros(item).fat.toFixed(1)}g
+                          </span>
                         </div>
 
                         <button onClick={() => handleRemoveItem(meal.id, item.id)} className="btn-icon btn-danger-icon">
@@ -529,7 +602,7 @@ export const PlanEditor: React.FC = () => {
                     <option value="">+ Add Food to {meal.name}</option>
                     {foods.map(food => (
                       <option key={food.name} value={food.name}>
-                        {food.name} ({food.calories} kcal / {food.unit})
+                        {food.name} ({food.calories} kcal / {food.unit}) - P: {food.protein}g C: {food.carbs}g F: {food.fat}g
                       </option>
                     ))}
                   </select>
@@ -548,6 +621,39 @@ export const PlanEditor: React.FC = () => {
             )}
           </div>
         </>
+      )}
+
+      {plan.options.length > 0 && (
+        <div className="plan-summary" style={{ marginTop: '2rem', background: 'var(--bg-card)' }}>
+          <h3 style={{ fontSize: '1.5rem', marginBottom: '1rem', color: 'var(--primary)' }}>Shopping Summary</h3>
+          <div className="shopping-list">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ textAlign: 'left', padding: '0.5rem' }}>Food</th>
+                  <th style={{ textAlign: 'right', padding: '0.5rem' }}>Total Quantity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {calculateShoppingList(plan).map((item, index) => {
+                  return (
+                  <tr key={index} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '0.5rem' }}>{item.food.name}</td>
+                    <td style={{ textAlign: 'right', padding: '0.5rem' }}>
+                      {item.food.unit === '100g' 
+                        ? `${(item.totalQuantity * 100).toFixed(0)}g`
+                        : item.food.unit === 'piece'
+                          ? `${item.totalQuantity}`
+                          : `${item.totalQuantity} x ${item.food.unit}`
+                      }
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );
